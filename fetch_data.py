@@ -353,34 +353,50 @@ def main():
         print("NDX PE unavailable -> will push with NDX PE marked as -- (SPX PE still complete)")
 
     trade_date = str(quotes[".SPX"]["date"])[:10]  # 只取 YYYY-MM-DD，避免盘中时间戳
+    qqq_date = str(qqq_date or "")[:10] or None
     repo = os.environ.get("GITHUB_REPOSITORY", "owner/repo")
     card_file = os.path.join(CARDS_DIR, f"{trade_date}.png")
     gen_card(quotes, spx_pe, ndx_pe, qqq_date or "最新", card_file)
-    img_url = f"https://raw.githubusercontent.com/{repo}/main/cards/{trade_date}.png"
+    # 图片走 jsdelivr CDN（国内可达，比 raw.githubusercontent.com 稳定）
+    img_url = f"https://cdn.jsdelivr.net/gh/{repo}@main/cards/{trade_date}.png"
 
     s1, s2 = strategy(spx_pe), strategy(ndx_pe)
 
+    def short_act(s):
+        if not s:
+            return "--"
+        return (s[1].replace("多投 ", "多").replace("正常投 ", "正常")
+                 .replace("少投 ", "少").replace("暂停定投", "暂停"))
+
+    p1, p2 = quotes[".SPX"]["change_pct"], quotes[".NDX"]["change_pct"]
+    md = trade_date[5:].replace("-", "/")
+    if s1 and s2:
+        tip = f"标普{short_act(s1)} 纳指{short_act(s2)}"
+    elif s1:
+        tip = f"标普{short_act(s1)} 纳指--"
+    else:
+        tip = "数据获取中"
+    title = f"📈美股日报 {md}｜标普{p1} 纳指{p2}｜{tip}"
+
     lines = []
-    lines.append(f"## 📈 美股指数日报 · {trade_date} 收盘\n")
-    lines.append("| 指数 | 收盘 | 涨跌 | 涨幅 |")
-    lines.append("|---|---|---|---|")
-    lines.append(f"| 标普500 | {quotes['.SPX']['price']:,.2f} | {quotes['.SPX']['change']} | **{quotes['.SPX']['change_pct']}** |")
-    lines.append(f"| 纳斯达克100 | {quotes['.NDX']['price']:,.2f} | {quotes['.NDX']['change']} | **{quotes['.NDX']['change_pct']}** |")
-    lines.append("")
-    lines.append("## 💰 定投策略（基准 1,667元/月）\n")
-    lines.append("| 标的 | PE | 判断 | 动作 | 金额 |")
-    lines.append("|---|---|---|---|---|")
-    lines.append(f"| 标普500 | {spx_pe:.2f} | {s1[0]} | {s1[1]} | **{s1[2]}** |" if s1 else "| 标普500 | -- | | | |")
-    lines.append(f"| 纳斯达克100 | {ndx_pe:.2f} | {s2[0]} | {s2[1]} | **{s2[2]}** |" if s2 else "| 纳斯达克100 | -- | | | |")
-    lines.append("")
-    lines.append(f"PE 来源：SPX=multpl（{spx_pe_note}）；NDX={qqq_sym or 'QQQ'}（FMP，{qqq_date or '最新'}）")
+    lines.append(f"### 📈 美股指数日报 · {trade_date} 收盘\n")
+    lines.append(f"**标普500**　{quotes['.SPX']['price']:,.2f}　{quotes['.SPX']['change']}　**{p1}**")
+    lines.append(f"**纳斯达克100**　{quotes['.NDX']['price']:,.2f}　{quotes['.NDX']['change']}　**{p2}**")
     lines.append("")
     lines.append(f"![日报卡片]({img_url})")
     lines.append("")
-    lines.append("> 基于PE估值的量化策略提示，不构成投资建议。市场有风险，投资需谨慎。")
+    lines.append("**定投建议**（基准 1,667元/月）：")
+    if s1:
+        lines.append(f"· 标普500 PE {spx_pe:.2f} → {s1[1]}（{s1[2]}）")
+    if s2:
+        lines.append(f"· 纳斯达克100 PE {ndx_pe:.2f} → {s2[1]}（{s2[2]}）")
+    elif ndx_pe is None:
+        lines.append("· 纳斯达克100 PE 暂缺")
+    lines.append("")
+    lines.append(f"PE来源：SPX=multpl｜NDX={qqq_sym or 'QQQ'}({qqq_date or '最新'})")
+    lines.append("> 量化策略提示，不构成投资建议")
 
     desp = "\n".join(lines)
-    title = f"美股指数日报 {trade_date}"
     resp = http_post(f"https://sctapi.ftqq.com/{sendkey}.send",
                      {"title": title, "desp": desp})
     print(resp)
