@@ -378,25 +378,8 @@ def main():
         tip = "数据获取中"
     title = f"📈美股日报 {md}｜标普{p1} 纳指{p2}｜{tip}"
 
-    lines = []
-    lines.append(f"### 📈 美股指数日报 · {trade_date} 收盘\n")
-    lines.append(f"**标普500**　{quotes['.SPX']['price']:,.2f}　{quotes['.SPX']['change']}　**{p1}**")
-    lines.append(f"**纳斯达克100**　{quotes['.NDX']['price']:,.2f}　{quotes['.NDX']['change']}　**{p2}**")
-    lines.append("")
-    lines.append(f"![日报卡片]({img_url})")
-    lines.append("")
-    lines.append("**定投建议**（基准 1,667元/月）：")
-    if s1:
-        lines.append(f"· 标普500 PE {spx_pe:.2f} → {s1[1]}（{s1[2]}）")
-    if s2:
-        lines.append(f"· 纳斯达克100 PE {ndx_pe:.2f} → {s2[1]}（{s2[2]}）")
-    elif ndx_pe is None:
-        lines.append("· 纳斯达克100 PE 暂缺")
-    lines.append("")
-    lines.append(f"PE来源：SPX=multpl｜NDX={qqq_sym or 'QQQ'}({qqq_date or '最新'})")
-    lines.append("> 量化策略提示，不构成投资建议")
-
-    desp = "\n".join(lines)
+    # 点开后只显示一张完整卡片图（所有信息都在图里），避免页面文字排版
+    desp = f"![日报卡片]({img_url})"
     resp = http_post(f"https://sctapi.ftqq.com/{sendkey}.send",
                      {"title": title, "desp": desp})
     print(resp)
