@@ -217,7 +217,20 @@ def strategy(pe):
 
 # ---------- 卡片生成 ----------
 
-def gen_card(quotes, spx_pe, ndx_pe, ndx_pe_src_date, out_path):
+def is_intraday():
+    """美股盘中检测（美东 周一~周五 9:30-16:00）。盘中触发的推送应标注"盘中"，避免被误认为收盘数据。"""
+    try:
+        from zoneinfo import ZoneInfo
+        ny = datetime.datetime.now(ZoneInfo("America/New_York"))
+    except Exception:
+        return False
+    if ny.weekday() >= 5:
+        return False
+    minutes = ny.hour * 60 + ny.minute
+    return 9 * 60 + 30 <= minutes < 16 * 60
+
+
+def gen_card(quotes, spx_pe, ndx_pe, ndx_pe_src_date, out_path, session_label="收盘"):
     from PIL import Image, ImageDraw, ImageFont
 
     W, H = 750, 1400
@@ -250,7 +263,7 @@ def gen_card(quotes, spx_pe, ndx_pe, ndx_pe_src_date, out_path):
 
     trade_date = str(quotes[".SPX"]["date"])[:10]  # 只取 YYYY-MM-DD，避免盘中时间戳
     tc(W / 2, 66, "美股指数日报", font(46, True), TITLE)
-    tc(W / 2, 132, f"{trade_date} 收盘 · 数据源：CNBC / multpl / FMP", font(22), SUB)
+    tc(W / 2, 132, f"{trade_date} {session_label} · 数据源：CNBC / multpl / FMP", font(22), SUB)
 
     y = 186
     items = [
@@ -354,9 +367,11 @@ def main():
 
     trade_date = str(quotes[".SPX"]["date"])[:10]  # 只取 YYYY-MM-DD，避免盘中时间戳
     qqq_date = str(qqq_date or "")[:10] or None
+    intraday = is_intraday()
+    session_label = "盘中" if intraday else "收盘"
     repo = os.environ.get("GITHUB_REPOSITORY", "owner/repo")
     card_file = os.path.join(CARDS_DIR, f"{trade_date}.png")
-    gen_card(quotes, spx_pe, ndx_pe, qqq_date or "最新", card_file)
+    gen_card(quotes, spx_pe, ndx_pe, qqq_date or "最新", card_file, session_label)
     # 图片走 jsdelivr CDN（国内可达，比 raw.githubusercontent.com 稳定）
     img_url = f"https://cdn.jsdelivr.net/gh/{repo}@main/cards/{trade_date}.png"
 
@@ -376,7 +391,8 @@ def main():
         tip = f"标普{short_act(s1)} 纳指--"
     else:
         tip = "数据获取中"
-    title = f"📈美股日报 {md}｜标普{p1} 纳指{p2}｜{tip}"
+    head = "📈美股盘中" if intraday else "📈美股日报"
+    title = f"{head} {md}｜标普{p1} 纳指{p2}｜{tip}"
 
     # 点开后只显示一张完整卡片图（所有信息都在图里），避免页面文字排版
     desp = f"![日报卡片]({img_url})"
