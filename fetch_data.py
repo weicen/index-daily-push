@@ -248,7 +248,7 @@ def gen_card(quotes, spx_pe, ndx_pe, ndx_pe_src_date, out_path):
     img = Image.new("RGB", (W, H), BG)
     d = ImageDraw.Draw(img)
 
-    trade_date = quotes[".SPX"]["date"]
+    trade_date = str(quotes[".SPX"]["date"])[:10]  # 只取 YYYY-MM-DD，避免盘中时间戳
     tc(W / 2, 66, "美股指数日报", font(46, True), TITLE)
     tc(W / 2, 132, f"{trade_date} 收盘 · 数据源：CNBC / multpl / FMP", font(22), SUB)
 
@@ -352,7 +352,7 @@ def main():
     if ndx_pe is None:
         print("NDX PE unavailable -> will push with NDX PE marked as -- (SPX PE still complete)")
 
-    trade_date = quotes[".SPX"]["date"]
+    trade_date = str(quotes[".SPX"]["date"])[:10]  # 只取 YYYY-MM-DD，避免盘中时间戳
     repo = os.environ.get("GITHUB_REPOSITORY", "owner/repo")
     card_file = os.path.join(CARDS_DIR, f"{trade_date}.png")
     gen_card(quotes, spx_pe, ndx_pe, qqq_date or "最新", card_file)
