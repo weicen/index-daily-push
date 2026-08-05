@@ -93,36 +93,73 @@ def get_multpl_spx_pe():
 
 
 def get_fmp_qqq_pe(api_key):
-    """返回 (pe, 交易日)。FMP 失败时不抛异常，返回 (None, None) 由上层降级。"""
-    try:
-        url = f"https://financialmodelingprep.com/api/v3/quote/QQQ?apikey={api_key}"
-        data = json.loads(http_get(url))
-        if not data:
-            return None, None
+    """
+    返回 (pe, 交易日, 用到的symbol)。FMP 新版 stable API。
+    FMP 免费层会把部分 ETF 标为 Special Endpoint（付费），因此依次尝试
+    QQQ -> QQQM(同为纳指100 ETF) -> ^NDX(指数)，取第一个有 pe 的。
+    全部失败返回 (None, None, None)，由上层降级。
+    """
+    candidates = ["QQQ", "QQQM", "%5ENDX"]
+    for sym in candidates:
+        try:
+            url = f"https://financialmodelingprep.com/stable/quote?symbol={sym}&apikey={api_key}"
+            data = json.loads(http_get(url))
+            pe, date = _extract_pe(data)
+            if pe is not None:
+                print(f"FMP NDX PE source: {sym} (pe={pe})")
+                return pe, date, sym
+            print(f"FMP {sym}: no pe field")
+            # 备用：key-metrics-ttm
+            url2 = f"https://financialmodelingprep.com/stable/key-metrics-ttm?symbol={sym}&apikey={api_key}"
+            data2 = json.loads(http_get(url2))
+            pe2, date2 = _extract_pe_metrics(data2)
+            if pe2 is not None:
+                print(f"FMP NDX PE source: {sym} key-metrics (pe={pe2})")
+                return pe2, date2, sym
+        except Exception as e:
+            print(f"FMP {sym} failed (will try next):", e)
+    return None, None, None
+
+
+def _extract_pe(data):
+    if isinstance(data, dict):
+        return data.get("pe"), data.get("date")
+    if isinstance(data, list) and data:
+        return data[0].get("pe"), data[0].get("date")
+    return None, None
+
+
+def _extract_pe_metrics(data):
+    if isinstance(data, list) and data:
         d = data[0]
-        return d.get("pe"), d.get("date")
-    except Exception as e:
-        print("FMP QQQ PE failed (will degrade):", e)
-        return None, None
+        for k in ("peRatioTTM", "peRatio", "pe", "trailingPE"):
+            if d.get(k) is not None:
+                return d[k], d.get("date")
+    return None, None
 
 
 def get_fmp_index_quotes(api_key):
-    """备用行情源：FMP 的 S&P 500(^GSPC) / Nasdaq-100(^NDX)"""
-    url = f"https://financialmodelingprep.com/api/v3/quote/%5EGSPC,%5ENDX?apikey={api_key}"
+    """备用行情源：FMP stable API 的 S&P 500(^GSPC) / Nasdaq-100(^NDX)"""
+    url = f"https://financialmodelingprep.com/stable/batch-quote?symbols=%5EGSPC,%5ENDX&apikey={api_key}"
     data = json.loads(http_get(url))
     out = {}
-    for d in data:
+    items = data if isinstance(data, list) else [data]
+    for d in items:
+        if not isinstance(d, dict):
+            continue
         sym = d.get("symbol")  # "^GSPC" / "^NDX"
         key = ".SPX" if sym == "^GSPC" else (".NDX" if sym == "^NDX" else None)
         if not key:
             continue
         ts = d.get("timestamp")
         date = datetime.datetime.utcfromtimestamp(ts).strftime("%Y-%m-%d") if ts else "unknown"
+        chg = d.get("change")
+        chg_pct = d.get("changesPercentage")
         out[key] = {
             "name": d.get("name", key),
             "price": float(d.get("price") or 0),
-            "change": d.get("change"),
-            "change_pct": f"{d.get('changesPercentage', 0):.2f}%",
+            "change": f"{chg:+.2f}" if isinstance(chg, (int, float)) else chg,
+            "change_pct": f"{chg_pct:.2f}%" if isinstance(chg_pct, (int, float)) else str(chg_pct or "0%"),
             "date": date,
         }
     return out
@@ -272,7 +309,7 @@ def main():
     if not quotes.get(".SPX") or not quotes.get(".NDX"):
         raise RuntimeError("行情获取失败: %s" % json.dumps(quotes, ensure_ascii=False))
     spx_pe, spx_pe_note = get_multpl_spx_pe()
-    qqq_pe, qqq_date = get_fmp_qqq_pe(fmp_key)
+    qqq_pe, qqq_date, qqq_sym = get_fmp_qqq_pe(fmp_key)
     ndx_pe = qqq_pe
     if ndx_pe is None:
         print("NDX PE unavailable -> will push with NDX PE marked as -- (SPX PE still complete)")
@@ -298,7 +335,7 @@ def main():
     lines.append(f"| 标普500 | {spx_pe:.2f} | {s1[0]} | {s1[1]} | **{s1[2]}** |" if s1 else "| 标普500 | -- | | | |")
     lines.append(f"| 纳斯达克100 | {ndx_pe:.2f} | {s2[0]} | {s2[1]} | **{s2[2]}** |" if s2 else "| 纳斯达克100 | -- | | | |")
     lines.append("")
-    lines.append(f"PE 来源：SPX=multpl（{spx_pe_note}）；NDX=QQQ（FMP，{qqq_date or '最新'}）")
+    lines.append(f"PE 来源：SPX=multpl（{spx_pe_note}）；NDX={qqq_sym or 'QQQ'}（FMP，{qqq_date or '最新'}）")
     lines.append("")
     lines.append(f"![日报卡片]({img_url})")
     lines.append("")
