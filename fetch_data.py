@@ -92,6 +92,40 @@ def get_multpl_spx_pe():
     return float(m.group(1)), (dm.group(1).strip() if dm else "日期未知")
 
 
+def get_nasdaq_qqq_pe():
+    """
+    Nasdaq 官方 API 取 QQQ(纳指100 ETF) 的 P/E，作为 FMP 失败时的兜底源。
+    云端(GitHub Actions 美国节点)访问快；本机可能超时属正常。
+    返回 (pe, None) 或 (None, None)。
+    """
+    try:
+        url = "https://api.nasdaq.com/api/quote/QQQ/info?assetclass=etf"
+        req = urllib.request.Request(url, headers={
+            **UA, "Accept": "application/json",
+            "Origin": "https://www.nasdaq.com",
+            "Referer": "https://www.nasdaq.com/",
+        })
+        with urllib.request.urlopen(req, timeout=25) as r:
+            data = json.loads(r.read().decode("utf-8", "ignore"))
+        ks = ((data.get("data") or {}).get("keyStats")) or {}
+        # keyStats 结构未知，宽松解析：label 含 pe/earnings 且 value 可转数字
+        for k, v in ks.items():
+            if isinstance(v, dict):
+                label = str(v.get("label", "")).lower()
+                if "pe" in label or "earnings" in label or "p/e" in label:
+                    try:
+                        pe = float(str(v.get("value", "")).replace(",", "").replace("x", "").strip())
+                        if pe > 0:
+                            print(f"Nasdaq QQQ PE source: {label} (pe={pe})")
+                            return pe, None
+                    except (ValueError, TypeError):
+                        continue
+        return None, None
+    except Exception as e:
+        print("Nasdaq QQQ PE failed:", e)
+        return None, None
+
+
 def get_fmp_qqq_pe(api_key):
     """
     返回 (pe, 交易日, 用到的symbol)。FMP 新版 stable API。
@@ -310,6 +344,10 @@ def main():
         raise RuntimeError("行情获取失败: %s" % json.dumps(quotes, ensure_ascii=False))
     spx_pe, spx_pe_note = get_multpl_spx_pe()
     qqq_pe, qqq_date, qqq_sym = get_fmp_qqq_pe(fmp_key)
+    if qqq_pe is None:
+        # FMP 免费层对 QQQ 系标的多为付费墙，改用 Nasdaq 官方 API 兜底
+        qqq_pe, _ = get_nasdaq_qqq_pe()
+        qqq_sym = qqq_sym or "QQQ"
     ndx_pe = qqq_pe
     if ndx_pe is None:
         print("NDX PE unavailable -> will push with NDX PE marked as -- (SPX PE still complete)")
