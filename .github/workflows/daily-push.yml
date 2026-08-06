@@ -2,8 +2,10 @@ name: daily-index-push
 
 on:
   schedule:
-    # 北京时间每天 08:00 = UTC 00:00；GitHub Actions 定时用 UTC
+    # 北京时间 07:55 / 08:00 / 08:05（GitHub 定时有延迟，多点触发+脚本幂等，尽量准点送达）
+    - cron: '55 23 * * *'
     - cron: '0 0 * * *'
+    - cron: '5 0 * * *'
   workflow_dispatch:   # 支持手动触发（Actions 页点 Run workflow）
 
 permissions:
@@ -31,14 +33,14 @@ jobs:
           SERVERCHAN_SENDKEY: ${{ secrets.SERVERCHAN_SENDKEY }}
         run: python fetch_data.py
 
-      - name: 提交卡片图片到仓库
+      - name: 提交卡片与状态文件到仓库
         run: |
-          if [ -n "$(git status --porcelain cards/)" ]; then
+          if [ -n "$(git status --porcelain cards/ state/)" ]; then
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add cards/
-            git commit -m "update daily card $(date +%F)"
+            git add cards/ state/
+            git commit -m "update daily card/state $(date +%F)"
             git push
           else
-            echo "no card changes"
+            echo "no changes"
           fi

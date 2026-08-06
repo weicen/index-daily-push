@@ -369,11 +369,22 @@ def main():
     qqq_date = str(qqq_date or "")[:10] or None
     intraday = is_intraday()
     session_label = "盘中" if intraday else "收盘"
+
+    # 幂等：同一天已推送过（多个 cron 时间点触发时避免重复推送）
+    state_file = os.path.join(BASE_DIR, "state", "last_push.txt")
+    try:
+        last = open(state_file, encoding="utf-8").read().strip()
+    except Exception:
+        last = ""
+    if last == trade_date:
+        print(f"already pushed for {trade_date}, skip")
+        return
+    if not os.path.isdir(os.path.dirname(state_file)):
+        os.makedirs(os.path.dirname(state_file), exist_ok=True)
+
     repo = os.environ.get("GITHUB_REPOSITORY", "owner/repo")
     card_file = os.path.join(CARDS_DIR, f"{trade_date}.png")
     gen_card(quotes, spx_pe, ndx_pe, qqq_date or "最新", card_file, session_label)
-    # 图片走 jsdelivr CDN（国内可达，比 raw.githubusercontent.com 稳定）
-    img_url = f"https://cdn.jsdelivr.net/gh/{repo}@main/cards/{trade_date}.png"
 
     s1, s2 = strategy(spx_pe), strategy(ndx_pe)
 
@@ -382,6 +393,9 @@ def main():
             return "--"
         return (s[1].replace("多投 ", "多").replace("正常投 ", "正常")
                  .replace("少投 ", "少").replace("暂停定投", "暂停"))
+
+    def level_text(s):
+        return s[0].replace("🟢 ", "").replace("🟡 ", "").replace("🟠 ", "").replace("🔴 ", "") if s else "--"
 
     p1, p2 = quotes[".SPX"]["change_pct"], quotes[".NDX"]["change_pct"]
     md = trade_date[5:].replace("-", "/")
@@ -394,12 +408,41 @@ def main():
     head = "📈美股盘中" if intraday else "📈美股日报"
     title = f"{head} {md}｜标普{p1} 纳指{p2}｜{tip}"
 
-    # 点开后只显示一张完整卡片图（所有信息都在图里），避免页面文字排版
-    desp = f"![日报卡片]({img_url})"
+    # ---- 正文：Markdown 表格（紧凑，手机友好，不依赖图片） ----
+    def mk_table(headers, rows):
+        sep = "|" + "---|" * len(headers)
+        return "\n".join(["|" + "|".join(headers) + "|", sep] +
+                         ["|" + "|".join(str(c) for c in r) + "|" for r in rows])
+
+    blocks = []
+    blocks.append(f"**{head.replace('📈', '')} {trade_date} {session_label}**")
+    blocks.append(mk_table(["指数", "收盘", "涨跌幅"], [
+        ["标普500", f"{quotes['.SPX']['price']:,.2f}", p1],
+        ["纳斯达克100", f"{quotes['.NDX']['price']:,.2f}", p2],
+    ]))
+    blocks.append("**定投建议（基准 1,667元/月）**")
+    rows = []
+    if s1:
+        rows.append(["标普500", f"{spx_pe:.2f}", level_text(s1), s1[1], s1[2]])
+    else:
+        rows.append(["标普500", "--", "--", "--", "--"])
+    if s2:
+        rows.append(["纳斯达克100", f"{ndx_pe:.2f}", level_text(s2), s2[1], s2[2]])
+    else:
+        rows.append(["纳斯达克100", "--", "--", "--", "--"])
+    blocks.append(mk_table(["标的", "PE", "判断", "动作", "金额"], rows))
+    if ndx_pe is None:
+        blocks.append("注：纳指100 PE 免费数据源暂缺（标普500 PE 来自 multpl，更新至最近交易日）")
+    blocks.append("⚠️ 量化策略提示，不构成投资建议")
+    desp = "\n\n".join(blocks)
+
     resp = http_post(f"https://sctapi.ftqq.com/{sendkey}.send",
                      {"title": title, "desp": desp})
     print(resp)
     print("OK push done")
+    # 推送成功后记录，供幂等判断
+    with open(state_file, "w", encoding="utf-8") as f:
+        f.write(trade_date)
 
 
 if __name__ == "__main__":
