@@ -126,42 +126,6 @@ def get_nasdaq_qqq_pe():
         return None, None
 
 
-def get_yahoo_qqq_pe():
-    """Yahoo Finance 页面抓取 QQQ(纳指100 ETF) 的 PE Ratio (TTM)。
-    本机 IP 可能被 Yahoo 拦截，GitHub Actions(美国数据中心) 可能可访问。
-    失败返回 (None, None)。"""
-    try:
-        url = "https://finance.yahoo.com/quote/QQQ/"
-        req = urllib.request.Request(url, headers={
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Accept": "text/html,application/xhtml+xml",
-        })
-        with urllib.request.urlopen(req, timeout=20) as r:
-            html = r.read().decode("utf-8", "ignore")
-        for pat in (r'PE Ratio \(TTM\)[^0-9]{0,40}([\d.]+)',
-                    r'Trailing P/E[^0-9]{0,40}([\d.]+)',
-                    r'"peRatio"[^0-9]{0,20}([\d.]+)'):
-            m = re.search(pat, html)
-            if m:
-                pe = float(m.group(1))
-                if pe > 5:  # 过滤明显错误值（受限页面可能返回 1.0 等占位）
-                    print(f"Yahoo QQQ PE source (pe={pe})")
-                    return pe, None
-                print(f"Yahoo PE suspicious({pe}) ctx: "
-                      + re.sub(r"\s+", " ", html[max(0, m.start() - 60):m.end() + 60]))
-        # 调试：打印页面里所有含 PE 的片段，便于修正解析
-        hits = 0
-        for m in re.finditer(r".{40}PE.{80}", re.sub(r"\s+", " ", html)):
-            print("YAHOO_CTX:", m.group(0))
-            hits += 1
-            if hits >= 8:
-                break
-        return None, None
-    except Exception as e:
-        print("Yahoo QQQ PE failed:", e)
-        return None, None
-
-
 def get_fmp_qqq_pe(api_key):
     """
     返回 (pe, 交易日, 用到的symbol)。FMP 新版 stable API。
@@ -394,10 +358,8 @@ def main():
     spx_pe, spx_pe_note = get_multpl_spx_pe()
     qqq_pe, qqq_date, qqq_sym = get_fmp_qqq_pe(fmp_key)
     if qqq_pe is None:
-        # FMP 免费层对 QQQ 系标的多为付费墙，依次尝试 Nasdaq 官方 API、Yahoo 页面
+        # FMP 免费层对 QQQ 系标的多为付费墙，Nasdaq 官方 API 兜底（无 PE 字段时静默返回 None）
         qqq_pe, _ = get_nasdaq_qqq_pe()
-    if qqq_pe is None:
-        qqq_pe, _ = get_yahoo_qqq_pe()
         qqq_sym = qqq_sym or "QQQ"
     ndx_pe = qqq_pe
     if ndx_pe is None:
