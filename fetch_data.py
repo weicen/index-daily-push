@@ -144,9 +144,18 @@ def get_yahoo_qqq_pe():
             m = re.search(pat, html)
             if m:
                 pe = float(m.group(1))
-                if pe > 0:
+                if pe > 5:  # 过滤明显错误值（受限页面可能返回 1.0 等占位）
                     print(f"Yahoo QQQ PE source (pe={pe})")
                     return pe, None
+                print(f"Yahoo PE suspicious({pe}) ctx: "
+                      + re.sub(r"\s+", " ", html[max(0, m.start() - 60):m.end() + 60]))
+        # 调试：打印页面里所有含 PE 的片段，便于修正解析
+        hits = 0
+        for m in re.finditer(r".{40}PE.{80}", re.sub(r"\s+", " ", html)):
+            print("YAHOO_CTX:", m.group(0))
+            hits += 1
+            if hits >= 8:
+                break
         return None, None
     except Exception as e:
         print("Yahoo QQQ PE failed:", e)
