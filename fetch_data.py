@@ -331,6 +331,92 @@ def gen_card(quotes, spx_pe, ndx_pe, ndx_pe_src_date, out_path, session_label="�
     return out_path
 
 
+# ---------- PE 分档图（每日推送用，浅色简洁风） ----------
+
+_SPX_SEGS = [(15, 22, (234, 243, 222), (61, 109, 17), "<22"), (22, 26, (225, 245, 238), (15, 110, 86), "22-26"),
+             (26, 31, (230, 241, 251), (24, 95, 165), "26-31"), (31, 35, (250, 238, 218), (133, 79, 11), "31-35"),
+             (35, 38, (252, 235, 235), (163, 45, 45), "≥35")]
+_NDX_SEGS = [(20, 26, (234, 243, 222), (61, 109, 17), "<26"), (26, 30, (225, 245, 238), (15, 110, 86), "26-30"),
+             (30, 35, (230, 241, 251), (24, 95, 165), "30-35"), (35, 39, (250, 238, 218), (133, 79, 11), "35-39"),
+             (39, 42, (252, 235, 235), (163, 45, 45), "≥39")]
+_BAND_LEFT, _BAND_RIGHT = 200, 830
+
+
+def _font(size, bold=False):
+    from PIL import ImageFont
+    for p in (r"/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc" if bold
+              else r"/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+              r"C:\Windows\Fonts\msyhbd.ttc" if bold else r"C:\Windows\Fonts\msyh.ttc"):
+        if os.path.exists(p):
+            return ImageFont.truetype(p, size)
+    return ImageFont.load_default()
+
+
+def _draw_band(d, y, segs, lo, hi, cur, cur_label, f12, f11):
+    span = hi - lo
+    total = _BAND_RIGHT - _BAND_LEFT
+    for s_lo, s_hi, fill, stroke, label in segs:
+        x1 = _BAND_LEFT + (s_lo - lo) / span * total
+        x2 = _BAND_LEFT + (s_hi - lo) / span * total
+        d.rectangle([x1, y, x2, y + 46], fill=fill, outline=stroke, width=1)
+        if x2 - x1 > 58:
+            d.text((x1 + (x2 - x1) / 2, y + 23), label, font=f12, fill=stroke, anchor="mm")
+    cx = _BAND_LEFT + (cur - lo) / span * total
+    d.line([cx, y - 14, cx, y], fill=(24, 95, 165), width=3)
+    d.ellipse([cx - 5, y - 19, cx + 5, y - 9], fill=(24, 95, 165), outline=(24, 95, 165))
+    d.text((cx, y - 30), cur_label, font=f12, fill=(12, 68, 124), anchor="mm")
+
+
+def gen_pe_chart(spx_pe, ndx_pe, out_path):
+    """生成两个指数的 PE 分档图（含当前值位置标记），浅色简洁风。"""
+    from PIL import Image, ImageDraw
+    W, H = 860, 480
+    img = Image.new("RGB", (W, H), (255, 255, 255))
+    d = ImageDraw.Draw(img)
+    f14b = _font(14, True)
+    f13 = _font(13)
+    f12 = _font(12)
+    f11 = _font(11)
+
+    # 标题
+    d.text((40, 26), "PE 估值分档 · 当前所处区间", font=f14b, fill=(44, 44, 42))
+
+    # 图例
+    lx = 40
+    for fill, stroke, name in [( (234, 243, 222), (61, 109, 17), "极度低估"),
+                               ((225, 245, 238), (15, 110, 86), "低估"),
+                               ((230, 241, 251), (24, 95, 165), "合理"),
+                               ((250, 238, 218), (133, 79, 11), "高估"),
+                               ((252, 235, 235), (163, 45, 45), "极度高估")]:
+        d.rectangle([lx, 56, lx + 16, 72], fill=fill, outline=stroke, width=1)
+        d.text((lx + 24, 64), name, font=f11, fill=stroke, anchor="lm")
+        lx += 24 + d.textlength(name, font=f11) + 26
+
+    # 标普500
+    d.text((40, 122), "标普500", font=f13, fill=(44, 44, 42))
+    d.text((40, 144), "multpl口径", font=f11, fill=(95, 94, 90))
+    cur = spx_pe if spx_pe is not None else 26
+    _draw_band(d, 130, _SPX_SEGS, 15, 38, cur, f"当前 {spx_pe:.1f}" if spx_pe else "PE 暂缺", f12, f11)
+
+    # 纳指100
+    d.text((40, 226), "纳指100", font=f13, fill=(44, 44, 42))
+    d.text((40, 248), "Yahoo口径", font=f11, fill=(95, 94, 90))
+    cur2 = ndx_pe if ndx_pe is not None else 30
+    _draw_band(d, 234, _NDX_SEGS, 20, 42, cur2, f"当前 {ndx_pe:.1f}" if ndx_pe else "PE 暂缺", f12, f11)
+
+    # 结论
+    d.line([40, 316, 820, 316], fill=(211, 209, 199), width=1)
+    if spx_pe is not None and ndx_pe is not None:
+        verdict = "正常定投 100%（1,667元/月）"
+    else:
+        verdict = "标普500 参考 PE 判断"
+    d.text((40, 336), f"当前两个指数均处估值" + ("合理区间" if (26 <= (spx_pe or 0) < 31 and 30 <= (ndx_pe or 0) < 35) else "非极端区间"), font=f13, fill=(44, 44, 42))
+    d.text((40, 366), "低估多投 / 高估少投 / 极度高估暂停 · 定投贵在坚持", font=f11, fill=(95, 94, 90))
+    d.text((40, 392), "阈值按固定口径连续跟踪，仅供参考，不构成投资建议", font=f11, fill=(136, 135, 128))
+    img.save(out_path)
+    return out_path
+
+
 # ---------- 主流程 ----------
 
 def main():
@@ -385,6 +471,9 @@ def main():
     repo = os.environ.get("GITHUB_REPOSITORY", "owner/repo")
     card_file = os.path.join(CARDS_DIR, f"{trade_date}.png")
     gen_card(quotes, spx_pe, ndx_pe, qqq_date or "最新", card_file, session_label)
+    pe_chart_file = os.path.join(CARDS_DIR, f"pe_{trade_date}.png")
+    gen_pe_chart(spx_pe, ndx_pe, pe_chart_file)
+    pe_img_url = f"https://cdn.jsdelivr.net/gh/{repo}@main/cards/pe_{trade_date}.png"
 
     s1, s2 = strategy(spx_pe), strategy(ndx_pe)
 
@@ -431,6 +520,8 @@ def main():
     else:
         rows.append(["纳斯达克100", "--", "--", "--", "--"])
     blocks.append(mk_table(["标的", "PE", "判断", "动作", "金额"], rows))
+    # PE 分档图（直观展示当前估值所处区间）
+    blocks.append(f"![PE估值分档图]({pe_img_url})")
     # 备注：展示用户设定的完整定投规则
     blocks.append("📋 定投规则（基准1,667元/月）\n"
                   "PE<25 极度低估→多投200%≈3,334元｜25-30 低估→多投150%≈2,500元\n"
